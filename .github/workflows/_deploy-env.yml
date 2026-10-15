@@ -49,16 +49,18 @@ jobs:
           name: docker-image
           path: /tmp/image
 
-      - name: Diagnóstico de secrets (temporal)
+      
+      - name: Diagnóstico de secrets
         env:
-          CID: ${{ secrets.AZURE_CLIENT_ID }}
-          TID: ${{ secrets.AZURE_TENANT_ID }}
-          SID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          C: ${{ secrets.AZURE_CLIENT_ID }}
+          T: ${{ secrets.AZURE_TENANT_ID }}
+          S: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          A: ${{ secrets.APP_SECRET }}
         run: |
-          echo "Environment: ${{ inputs.environment }}"
-          echo "CLIENT_ID longitud: ${#CID}"
-          echo "TENANT_ID longitud: ${#TID}"
-          echo "SUBSCRIPTION_ID longitud: ${#SID}"    
+          echo "CLIENT_ID: ${#C}"
+          echo "TENANT_ID: ${#T}"
+          echo "SUBSCRIPTION_ID: ${#S}"
+          echo "APP_SECRET: ${#A}"
 
       - name: Login en Azure (OIDC)
         uses: azure/login@v2
