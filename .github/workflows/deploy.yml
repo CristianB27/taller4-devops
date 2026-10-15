@@ -74,6 +74,7 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/_deploy-env.yml
+    secrets: inherit
     with:
       environment: dev
       image_name: taller4-app
@@ -98,6 +99,7 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/_deploy-env.yml
+    secrets: inherit
     with:
       environment: prod
       image_name: taller4-app

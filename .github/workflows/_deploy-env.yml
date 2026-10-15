@@ -49,7 +49,6 @@ jobs:
           name: docker-image
           path: /tmp/image
 
-      
       - name: Diagnóstico de secrets
         env:
           C: ${{ secrets.AZURE_CLIENT_ID }}
