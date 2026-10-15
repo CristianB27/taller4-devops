@@ -1,0 +1,130 @@
+name: Deploy environment (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "dev o prod"
+        required: true
+        type: string
+      image_name:
+        required: true
+        type: string
+      image_tag:
+        description: "SHA del commit"
+        required: true
+        type: string
+    outputs:
+      app_url:
+        description: "URL pública de la aplicación"
+        value: ${{ jobs.deploy.outputs.app_url }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    # Aquí se aplican las reglas de protección: en prod pausa hasta que un revisor apruebe.
+    # Los secrets y vars de esta ejecución son los del Environment correspondiente.
+    environment: ${{ inputs.environment }}
+    outputs:
+      app_url: ${{ steps.tfout.outputs.app_url }}
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      TF_VAR_app_secret: ${{ secrets.APP_SECRET }}
+      TF_VAR_app_message: ${{ vars.APP_MESSAGE }}
+      TF_VAR_image_name: ${{ inputs.image_name }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Descargar imagen construida y escaneada
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/image
+
+      - name: Login en Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_SA }}" \
+            -backend-config="container_name=tfstate-${{ inputs.environment }}" \
+            -backend-config="key=${{ inputs.environment }}.tfstate"
+
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: infra
+        run: terraform plan -input=false -var-file=environments/${{ inputs.environment }}.tfvars -out=tfplan
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Leer outputs de Terraform
+        id: tfout
+        working-directory: infra
+        run: |
+          {
+            echo "acr_name=$(terraform output -raw acr_name)"
+            echo "acr_login_server=$(terraform output -raw acr_login_server)"
+            echo "app_name=$(terraform output -raw app_name)"
+            echo "rg_name=$(terraform output -raw resource_group_name)"
+            echo "app_url=$(terraform output -raw app_url)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publicar imagen en el ACR del ambiente
+        env:
+          ACR_NAME: ${{ steps.tfout.outputs.acr_name }}
+          LOGIN_SERVER: ${{ steps.tfout.outputs.acr_login_server }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          docker load -i /tmp/image/image.tar
+          docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Reintentos: el rol AcrPush recién creado puede tardar en propagarse
+          pushed=false
+          for i in 1 2 3 4 5 6; do
+            if az acr login --name "$ACR_NAME" && docker push "${LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"; then
+              pushed=true
+              break
+            fi
+            echo "Reintentando ($i/6): esperando propagación de permisos..."
+            sleep 20
+          done
+          $pushed || { echo "No se pudo publicar la imagen"; exit 1; }
+
+      - name: Desplegar imagen (tag = commit) en App Service
+        env:
+          APP_NAME: ${{ steps.tfout.outputs.app_name }}
+          RG_NAME: ${{ steps.tfout.outputs.rg_name }}
+          LOGIN_SERVER: ${{ steps.tfout.outputs.acr_login_server }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          az webapp config set \
+            --name "$APP_NAME" --resource-group "$RG_NAME" \
+            --linux-fx-version "DOCKER|${LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" -o none
+          az webapp restart --name "$APP_NAME" --resource-group "$RG_NAME"

@@ -1,0 +1,115 @@
+name: CI/CD dev y prod
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: taller4-app
+
+jobs:
+  # ---------- Seguridad de infraestructura ----------
+  checkov:
+    name: Checkov (IaC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra
+          framework: terraform
+          config_file: .checkov.yaml
+          quiet: true
+
+  # ---------- Build + seguridad de imagen ----------
+  build-scan:
+    name: Build y Trivy (imagen)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (tag = commit SHA)
+        run: |
+          docker build \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            -t ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            app
+
+      - name: Trivy (vulnerabilidades HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+
+      - name: Exportar imagen
+        run: docker save ${{ env.IMAGE_NAME }}:${{ github.sha }} -o image.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 1
+
+  # ---------- DEV: automático al hacer merge en main ----------
+  deploy-dev:
+    name: Deploy dev
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [checkov, build-scan]
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy-env.yml
+    with:
+      environment: dev
+      image_name: taller4-app
+      image_tag: ${{ github.sha }}
+
+  smoke-test-dev:
+    name: Prueba de disponibilidad dev
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Health check
+        env:
+          APP_URL: ${{ needs.deploy-dev.outputs.app_url }}
+        run: bash scripts/health-check.sh "$APP_URL" dev "${{ github.sha }}"
+
+  # ---------- PROD: pausa hasta aprobación (Environment "prod") ----------
+  deploy-prod:
+    name: Deploy prod (requiere aprobación)
+    needs: smoke-test-dev
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy-env.yml
+    with:
+      environment: prod
+      image_name: taller4-app
+      image_tag: ${{ github.sha }}
+
+  smoke-test-prod:
+    name: Verificación post-despliegue prod
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Health check
+        env:
+          APP_URL: ${{ needs.deploy-prod.outputs.app_url }}
+        run: bash scripts/health-check.sh "$APP_URL" prod "${{ github.sha }}"

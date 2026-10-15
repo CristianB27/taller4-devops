@@ -1,0 +1,27 @@
+# Excepciones justificadas por el requisito de "bajo costo" del taller.
+# Estas son recomendaciones de capas Premium / alta disponibilidad / red privada.
+# Los IDs pueden variar según la versión de Checkov: corre `checkov -d infra`
+# localmente y ajusta esta lista con lo que realmente reporte.
+skip-check:
+  # ACR Basic (Premium: geo-replicación, cuarentena, firmas, zona redundante, endpoints dedicados)
+  - CKV_AZURE_163
+  - CKV_AZURE_164
+  - CKV_AZURE_165
+  - CKV_AZURE_166
+  - CKV_AZURE_167
+  - CKV_AZURE_233
+  - CKV_AZURE_237
+  # Acceso público necesario para la demo (sin red privada ni WAF)
+  - CKV_AZURE_139
+  - CKV_AZURE_222
+  # App Service Plan B1: 1 instancia, sin redundancia de zona
+  - CKV_AZURE_211
+  - CKV_AZURE_212
+  - CKV_AZURE_225
+  # Autenticación de usuarios / certificados cliente: fuera de alcance de la demo
+  - CKV_AZURE_13
+  - CKV_AZURE_17
+  # Logging de diagnóstico: fuera de alcance (añadiría Log Analytics y costo)
+  - CKV_AZURE_63
+  - CKV_AZURE_65
+  - CKV_AZURE_66
