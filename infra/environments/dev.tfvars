@@ -1,3 +1,3 @@
 environment         = "dev"
-resource_group_name = "rg-taller4-dev"
+resource_group_name = "rg-taller4-dev2"
 sku_name            = "B1"
