@@ -6,6 +6,7 @@ ENV NODE_ENV=production \
     APP_VERSION=${GIT_SHA}
 
 WORKDIR /app
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY package.json server.js ./
 RUN chown -R node:node /app
 
