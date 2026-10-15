@@ -18,6 +18,8 @@ skip-check:
   - CKV_AZURE_211
   - CKV_AZURE_212
   - CKV_AZURE_225
+  # App stateless: no necesita almacenamiento persistente de Azure Files
+  - CKV_AZURE_88
   # Autenticación de usuarios / certificados cliente: fuera de alcance de la demo
   - CKV_AZURE_13
   - CKV_AZURE_17
